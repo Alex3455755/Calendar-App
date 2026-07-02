@@ -1,0 +1,6 @@
+{
+  "name": "Календарь",
+  "description": "Простой и красивый календарь с напоминаниями о событиях в светло-голубых и коралловых тонах.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
