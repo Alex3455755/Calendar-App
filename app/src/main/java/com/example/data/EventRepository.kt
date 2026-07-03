@@ -2,6 +2,7 @@ package com.example.data
 
 import android.content.Context
 import com.example.receiver.AlarmHelper
+import com.example.widget.CalendarWidgetProvider
 import kotlinx.coroutines.flow.Flow
 
 class EventRepository(
@@ -17,15 +18,18 @@ class EventRepository(
         if (eventWithId.hasNotification) {
             AlarmHelper.scheduleAlarm(context, eventWithId)
         }
+        CalendarWidgetProvider.triggerUpdate(context)
     }
 
     suspend fun deleteEvent(event: CalendarEvent) {
         AlarmHelper.cancelAlarm(context, event.id)
         eventDao.deleteEvent(event)
+        CalendarWidgetProvider.triggerUpdate(context)
     }
 
     suspend fun deleteEventById(id: Int) {
         AlarmHelper.cancelAlarm(context, id)
         eventDao.deleteEventById(id)
+        CalendarWidgetProvider.triggerUpdate(context)
     }
 }

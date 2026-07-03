@@ -49,6 +49,9 @@ import androidx.compose.material.icons.filled.EventNote
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Upload
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -57,6 +60,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -69,7 +78,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.lazy.rememberLazyListState
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -125,11 +137,399 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            MyApplicationTheme {
-                val viewModel: CalendarViewModel = viewModel(
-                    factory = CalendarViewModel.Factory(application)
-                )
+            val viewModel: CalendarViewModel = viewModel(
+                factory = CalendarViewModel.Factory(application)
+            )
+            val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+            val useDarkTheme = when (themeMode) {
+                1 -> false
+                2 -> true
+                else -> androidx.compose.foundation.isSystemInDarkTheme()
+            }
+            MyApplicationTheme(darkTheme = useDarkTheme) {
                 CalendarAppScreen(viewModel = viewModel)
+            }
+        }
+    }
+}
+
+fun getBannerDrawableId(bannerKey: String): Int {
+    return when (bannerKey) {
+        "waves" -> R.drawable.banner_waves
+        "shapes" -> R.drawable.banner_shapes
+        else -> R.drawable.calendar_banner
+    }
+}
+
+@Composable
+fun SettingsView(
+    viewModel: CalendarViewModel,
+    modifier: Modifier = Modifier
+) {
+    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val bannerImageKey by viewModel.bannerImage.collectAsStateWithLifecycle()
+    
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                try {
+                    val jsonString = viewModel.exportEventsToJson()
+                    context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                        outputStream.write(jsonString.toByteArray(Charsets.UTF_8))
+                    }
+                    Toast.makeText(context, "События успешно экспортированы!", Toast.LENGTH_LONG).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Ошибка экспорта: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                try {
+                    val inputStream = context.contentResolver.openInputStream(uri)
+                    val jsonString = inputStream?.bufferedReader()?.use { it.readText() }
+                    if (jsonString != null) {
+                        viewModel.importEventsFromJson(
+                            jsonString = jsonString,
+                            onComplete = { count ->
+                                Toast.makeText(context, "Импортировано событий: $count", Toast.LENGTH_LONG).show()
+                            },
+                            onError = { error ->
+                                Toast.makeText(context, "Ошибка импорта: $error", Toast.LENGTH_LONG).show()
+                            }
+                        )
+                    } else {
+                        Toast.makeText(context, "Не удалось прочитать файл", Toast.LENGTH_LONG).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Ошибка импорта: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        // Hero Visual Header Banner
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp)
+        ) {
+            Image(
+                painter = painterResource(id = getBannerDrawableId(bannerImageKey)),
+                contentDescription = "Календарь Баннер",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            // Ambient Dark Overlay for contrast
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.352f))
+            )
+            
+            // Status bar padding
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Настройки",
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Настройте внешний вид приложения",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color.White.copy(alpha = 0.9f)
+                    )
+                )
+            }
+        }
+
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            // Theme setting section
+            item {
+                Text(
+                    text = "Тема оформления",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    ),
+                    modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
+                )
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        val themeOptions = listOf("Системная", "Светлая", "Темная")
+                        themeOptions.forEachIndexed { index, option ->
+                            val isSelected = themeMode == index
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent
+                                    )
+                                    .clickable { viewModel.setThemeMode(index) }
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Palette,
+                                    contentDescription = null,
+                                    tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text(
+                                    text = option,
+                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.primary)
+                                    )
+                                }
+                            }
+                            if (index < themeOptions.size - 1) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Background image setting section
+            item {
+                Text(
+                    text = "Фоновое изображение",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    ),
+                    modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
+                )
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        val banners = listOf(
+                            Triple("neutral", "Нейтральный стиль", R.drawable.calendar_banner),
+                            Triple("waves", "Плавные волны", R.drawable.banner_waves),
+                            Triple("shapes", "Абстрактные фигуры", R.drawable.banner_shapes)
+                        )
+
+                        banners.forEachIndexed { index, (key, title, drawableResId) ->
+                            val isSelected = bannerImageKey == key
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent
+                                    )
+                                    .clickable { viewModel.setBannerImage(key) }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Miniature image preview
+                                Image(
+                                    painter = painterResource(id = drawableResId),
+                                    contentDescription = title,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(width = 64.dp, height = 44.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text(
+                                    text = title,
+                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.primary)
+                                    )
+                                }
+                            }
+                            if (index < banners.size - 1) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Backup and restore section
+            item {
+                Text(
+                    text = "Резервное копирование",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    ),
+                    modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
+                )
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Вы можете перенести все ваши события и заметки на другое устройство. Экспортируйте их в файл, а затем импортируйте на новом устройстве.",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            ),
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Button(
+                                onClick = { exportLauncher.launch("calendar_backup.json") },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Экспорт",
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+
+                            Button(
+                                onClick = { importLauncher.launch(arrayOf("*/*")) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.secondary
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Upload,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Импорт",
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Helpful Info Card
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.04f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.NotificationsActive,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column {
+                            Text(
+                                text = "Уведомления активны",
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "При наступлении времени события вам придет push-уведомление.",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(40.dp)) // padding at bottom so navigation doesn't hide it
             }
         }
     }
@@ -144,271 +544,328 @@ fun CalendarAppScreen(
     val currentMonth by viewModel.currentMonth.collectAsStateWithLifecycle()
     val eventsForSelectedDate by viewModel.selectedDateEvents.collectAsStateWithLifecycle()
     val datesWithEvents by viewModel.datesWithEvents.collectAsStateWithLifecycle()
+    val bannerImageKey by viewModel.bannerImage.collectAsStateWithLifecycle()
 
     var showAddDialog by remember { mutableStateOf(false) }
+    var currentTab by remember { mutableStateOf(0) } // 0: Calendar, 1: Settings
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets(0, 0, 0, 0), // handle edge-to-edge manually
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showAddDialog = true },
-                containerColor = MaterialTheme.colorScheme.secondary,
-                contentColor = MaterialTheme.colorScheme.onSecondary,
-                modifier = Modifier
-                    .padding(WindowInsets.navigationBars.asPaddingValues())
-                    .padding(16.dp)
-                    .testTag("add_event_fab")
+        bottomBar = {
+            NavigationBar(
+                containerColor = MaterialTheme.colorScheme.surface,
+                tonalElevation = 8.dp,
+                modifier = Modifier.height(72.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Добавить событие",
-                    modifier = Modifier.size(28.dp)
+                NavigationBarItem(
+                    selected = currentTab == 0,
+                    onClick = { currentTab = 0 },
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.CalendarMonth,
+                            contentDescription = "Календарь"
+                        )
+                    },
+                    label = { Text("Календарь") },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = MaterialTheme.colorScheme.primary,
+                        selectedTextColor = MaterialTheme.colorScheme.primary,
+                        unselectedIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        unselectedTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    )
                 )
+                NavigationBarItem(
+                    selected = currentTab == 1,
+                    onClick = { currentTab = 1 },
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Настройки"
+                        )
+                    },
+                    label = { Text("Настройки") },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = MaterialTheme.colorScheme.primary,
+                        selectedTextColor = MaterialTheme.colorScheme.primary,
+                        unselectedIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        unselectedTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    )
+                )
+            }
+        },
+        floatingActionButton = {
+            if (currentTab == 0) {
+                FloatingActionButton(
+                    onClick = { showAddDialog = true },
+                    containerColor = MaterialTheme.colorScheme.secondary,
+                    contentColor = MaterialTheme.colorScheme.onSecondary,
+                    modifier = Modifier
+                        .padding(bottom = 12.dp)
+                        .testTag("add_event_fab")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Добавить событие",
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
             }
         }
     ) { innerPadding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
+                .padding(bottom = innerPadding.calculateBottomPadding())
         ) {
-            // Hero Visual Header Banner
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(180.dp)
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.calendar_banner),
-                    contentDescription = "Календарь Баннер",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-                // Ambient Dark Overlay for contrast
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.352f))
-                )
-                
-                // Status bar padding so the title sits beautifully under the status bar notch
+            if (currentTab == 0) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .statusBarsPadding()
-                        .padding(horizontal = 24.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.Center
+                        .background(MaterialTheme.colorScheme.background)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.CalendarMonth,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
+                    // Hero Visual Header Banner
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                    ) {
+                        Image(
+                            painter = painterResource(id = getBannerDrawableId(bannerImageKey)),
+                            contentDescription = "Календарь Баннер",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = "Мой Календарь",
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
+                        // Ambient Dark Overlay for contrast
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.352f))
+                        )
+                        
+                        // Status bar padding so the title sits beautifully under the status bar notch
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .statusBarsPadding()
+                                .padding(horizontal = 24.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.CalendarMonth,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = "Мой Календарь",
+                                    style = MaterialTheme.typography.headlineMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Планируйте дни и получайте напоминания",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    color = Color.White.copy(alpha = 0.9f)
+                                )
                             )
-                        )
+                        }
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Планируйте дни и получайте напоминания",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            color = Color.White.copy(alpha = 0.9f)
-                        )
-                    )
-                }
-            }
 
-            // Calendar Card Panel
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 16.dp),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
-                    // Month & Navigation Controls
+                    // Calendar Card Panel
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .padding(top = 16.dp),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
+                        ) {
+                            // Month & Navigation Controls
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val localeRu = Locale("ru")
+                                val monthName = currentMonth.month.getDisplayName(TextStyle.FULL_STANDALONE, localeRu)
+                                    .replaceFirstChar { it.titlecase(localeRu) }
+                                val yearText = currentMonth.year.toString()
+
+                                Text(
+                                    text = "$monthName $yearText",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontSize = 18.sp
+                                    ),
+                                    modifier = Modifier.padding(start = 4.dp)
+                                )
+
+                                Row {
+                                    IconButton(
+                                        onClick = { viewModel.prevMonth() },
+                                        modifier = Modifier.testTag("prev_month_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                            contentDescription = "Предыдущий месяц",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { viewModel.nextMonth() },
+                                        modifier = Modifier.testTag("next_month_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                            contentDescription = "Следующий месяц",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Days of Week labels (Ru)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                val daysOfWeek = listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
+                                daysOfWeek.forEach { day ->
+                                    Text(
+                                        text = day,
+                                        modifier = Modifier.weight(1f),
+                                        textAlign = TextAlign.Center,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (day == "Сб" || day == "Вс") MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                        )
+                                    )
+                                }
+                            }
+
+                            // Calendar Grid Layout
+                            CalendarDaysGrid(
+                                selectedDate = selectedDate,
+                                currentMonth = currentMonth,
+                                datesWithEvents = datesWithEvents,
+                                onDateSelected = { date -> viewModel.selectDate(date) }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Events Title / Header for Selected Day
+                    val formatter = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale("ru"))
+                    val formattedSelectedDate = selectedDate.format(formatter)
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 12.dp),
+                            .padding(horizontal = 24.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val localeRu = Locale("ru")
-                        val monthName = currentMonth.month.getDisplayName(TextStyle.FULL_STANDALONE, localeRu)
-                            .replaceFirstChar { it.titlecase(localeRu) }
-                        val yearText = currentMonth.year.toString()
-
                         Text(
-                            text = "$monthName $yearText",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontSize = 18.sp
-                            ),
-                            modifier = Modifier.padding(start = 4.dp)
-                        )
-
-                        Row {
-                            IconButton(
-                                onClick = { viewModel.prevMonth() },
-                                modifier = Modifier.testTag("prev_month_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                                    contentDescription = "Предыдущий месяц",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                            IconButton(
-                                onClick = { viewModel.nextMonth() },
-                                modifier = Modifier.testTag("next_month_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                    contentDescription = "Следующий месяц",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                    }
-
-                    // Days of Week labels (Ru)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        val daysOfWeek = listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
-                        daysOfWeek.forEach { day ->
-                            Text(
-                                text = day,
-                                modifier = Modifier.weight(1f),
-                                textAlign = TextAlign.Center,
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (day == "Сб" || day == "Вс") MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                                )
-                            )
-                        }
-                    }
-
-                    // Calendar Grid Layout
-                    CalendarDaysGrid(
-                        selectedDate = selectedDate,
-                        currentMonth = currentMonth,
-                        datesWithEvents = datesWithEvents,
-                        onDateSelected = { date -> viewModel.selectDate(date) }
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Events Title / Header for Selected Day
-            val formatter = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale("ru"))
-            val formattedSelectedDate = selectedDate.format(formatter)
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "События: $formattedSelectedDate",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                )
-
-                if (eventsForSelectedDate.isNotEmpty()) {
-                    Text(
-                        text = "Всего: ${eventsForSelectedDate.size}",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    )
-                }
-            }
-
-            // Events List View (using Weight to let list scroll inside constraints, and saving bottom padding for the navigation pill bar)
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-            ) {
-                if (eventsForSelectedDate.isEmpty()) {
-                    // Empty State Graphic and Message
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.EventNote,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
-                            modifier = Modifier.size(72.dp)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "Нет запланированных событий",
+                            text = "События: $formattedSelectedDate",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-                            ),
-                            textAlign = TextAlign.Center
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Нажмите на + внизу, чтобы добавить первое событие на этот день",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
-                            ),
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        )
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                            bottom = 80.dp, // margin for FAB
-                            top = 8.dp
-                        )
-                    ) {
-                        items(eventsForSelectedDate, key = { it.id }) { event ->
-                            EventListItem(
-                                event = event,
-                                onDelete = { viewModel.deleteEvent(event) }
+
+                        if (eventsForSelectedDate.isNotEmpty()) {
+                            Text(
+                                text = "Всего: ${eventsForSelectedDate.size}",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                             )
                         }
                     }
+
+                    // Events List View (using Weight to let list scroll inside constraints)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        if (eventsForSelectedDate.isEmpty()) {
+                            // Empty State Graphic and Message
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.EventNote,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                                    modifier = Modifier.size(72.dp)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = "Нет запланированных событий",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                                    ),
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Нажмите на + внизу, чтобы добавить первое событие на этот день",
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                                    ),
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                )
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                    bottom = 80.dp, // margin for FAB
+                                    top = 8.dp
+                                )
+                            ) {
+                                items(eventsForSelectedDate, key = { it.id }) { event ->
+                                    EventListItem(
+                                        event = event,
+                                        onDelete = { viewModel.deleteEvent(event) }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
+            } else {
+                SettingsView(viewModel = viewModel)
             }
         }
 
@@ -744,9 +1201,9 @@ fun AddEventDialog(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Custom Time Selector (Hour & Minute spinners)
+                // Custom Time Selector (Scrollable Picker)
                 Text(
-                    text = "Время напоминания",
+                    text = "Время напоминания (прокрутите для выбора)",
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
@@ -758,60 +1215,156 @@ fun AddEventDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .height(130.dp)
                         .background(
                             MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
                             shape = RoundedCornerShape(16.dp)
                         )
-                        .padding(vertical = 12.dp, horizontal = 16.dp),
+                        .padding(vertical = 4.dp, horizontal = 16.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Hours Selector
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        IconButton(onClick = { hour = if (hour == 23) 0 else hour + 1 }) {
-                            Text("+", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                    val coroutineScope = rememberCoroutineScope()
+
+                    // Hours Scroll List
+                    val hoursList = (0..23).toList()
+                    val hoursState = rememberLazyListState(initialFirstVisibleItemIndex = hour)
+                    
+                    LaunchedEffect(hoursState.isScrollInProgress) {
+                        if (!hoursState.isScrollInProgress) {
+                            val targetIndex = hoursState.firstVisibleItemIndex
+                            if (targetIndex in hoursList.indices) {
+                                hour = hoursList[targetIndex]
+                            }
                         }
-                        Text(
-                            text = String.format(Locale.getDefault(), "%02d", hour),
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(110.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Highlight bar for active item
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(36.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
                         )
-                        IconButton(onClick = { hour = if (hour == 0) 23 else hour - 1 }) {
-                            Text("-", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+
+                        LazyColumn(
+                            state = hoursState,
+                            modifier = Modifier.fillMaxHeight(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 38.dp)
+                        ) {
+                            items(hoursList.size) { index ->
+                                val hr = hoursList[index]
+                                val isSelected = hr == hour
+                                Text(
+                                    text = String.format(Locale.getDefault(), "%02d", hr),
+                                    style = if (isSelected) {
+                                        MaterialTheme.typography.titleLarge.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontSize = 20.sp
+                                        )
+                                    } else {
+                                        MaterialTheme.typography.bodyMedium.copy(
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                                            fontSize = 16.sp
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .clickable {
+                                            hour = hr
+                                            coroutineScope.launch {
+                                                hoursState.animateScrollToItem(index)
+                                            }
+                                        }
+                                        .padding(vertical = 6.dp)
+                                )
+                            }
                         }
                     }
 
                     Text(
                         text = ":",
-                        style = MaterialTheme.typography.headlineMedium.copy(
+                        style = MaterialTheme.typography.titleLarge.copy(
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 24.sp
                         ),
-                        modifier = Modifier.padding(horizontal = 16.dp)
+                        modifier = Modifier.padding(horizontal = 12.dp)
                     )
 
-                    // Minutes Selector
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        IconButton(onClick = { minute = if (minute >= 55) 0 else minute + 5 }) {
-                            Text("+", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                    // Minutes Scroll List
+                    val minutesList = (0..59).toList()
+                    val minutesState = rememberLazyListState(initialFirstVisibleItemIndex = minute)
+                    
+                    LaunchedEffect(minutesState.isScrollInProgress) {
+                        if (!minutesState.isScrollInProgress) {
+                            val targetIndex = minutesState.firstVisibleItemIndex
+                            if (targetIndex in minutesList.indices) {
+                                minute = minutesList[targetIndex]
+                            }
                         }
-                        Text(
-                            text = String.format(Locale.getDefault(), "%02d", minute),
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(110.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Highlight bar for active item
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(36.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
                         )
-                        IconButton(onClick = { minute = if (minute <= 0) 55 else minute - 5 }) {
-                            Text("-", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+
+                        LazyColumn(
+                            state = minutesState,
+                            modifier = Modifier.fillMaxHeight(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 38.dp)
+                        ) {
+                            items(minutesList.size) { index ->
+                                val min = minutesList[index]
+                                val isSelected = min == minute
+                                Text(
+                                    text = String.format(Locale.getDefault(), "%02d", min),
+                                    style = if (isSelected) {
+                                        MaterialTheme.typography.titleLarge.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontSize = 20.sp
+                                        )
+                                    } else {
+                                        MaterialTheme.typography.bodyMedium.copy(
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                                            fontSize = 16.sp
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .clickable {
+                                            minute = min
+                                            coroutineScope.launch {
+                                                minutesState.animateScrollToItem(index)
+                                            }
+                                        }
+                                        .padding(vertical = 6.dp)
+                                )
+                            }
                         }
                     }
                 }

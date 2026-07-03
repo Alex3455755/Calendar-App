@@ -1,6 +1,7 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -15,6 +16,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -24,6 +27,13 @@ import java.time.ZoneId
 class CalendarViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: EventRepository
+    private val sharedPreferences = application.getSharedPreferences("calendar_settings", Context.MODE_PRIVATE)
+
+    private val _themeMode = MutableStateFlow(sharedPreferences.getInt("theme_mode", 0)) // 0: System, 1: Light, 2: Dark
+    val themeMode: StateFlow<Int> = _themeMode.asStateFlow()
+
+    private val _bannerImage = MutableStateFlow(sharedPreferences.getString("banner_image", "neutral") ?: "neutral") // "neutral", "waves", "shapes"
+    val bannerImage: StateFlow<String> = _bannerImage.asStateFlow()
 
     init {
         val database = CalendarDatabase.getDatabase(application)
@@ -107,6 +117,58 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
     fun deleteEvent(event: CalendarEvent) {
         viewModelScope.launch {
             repository.deleteEvent(event)
+        }
+    }
+
+    fun setThemeMode(mode: Int) {
+        _themeMode.value = mode
+        sharedPreferences.edit().putInt("theme_mode", mode).apply()
+    }
+
+    fun setBannerImage(banner: String) {
+        _bannerImage.value = banner
+        sharedPreferences.edit().putString("banner_image", banner).apply()
+    }
+
+    fun exportEventsToJson(): String {
+        val jsonArray = JSONArray()
+        allEvents.value.forEach { event ->
+            val jsonObject = JSONObject().apply {
+                put("title", event.title)
+                put("description", event.description)
+                put("dateMillis", event.dateMillis)
+                put("hasNotification", event.hasNotification)
+            }
+            jsonArray.put(jsonObject)
+        }
+        return jsonArray.toString(4)
+    }
+
+    fun importEventsFromJson(jsonString: String, onComplete: (Int) -> Unit, onError: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val jsonArray = JSONArray(jsonString)
+                var count = 0
+                for (i in 0 until jsonArray.length()) {
+                    val jsonObject = jsonArray.getJSONObject(i)
+                    val title = jsonObject.getString("title")
+                    val description = jsonObject.optString("description", "")
+                    val dateMillis = jsonObject.getLong("dateMillis")
+                    val hasNotification = jsonObject.optBoolean("hasNotification", true)
+
+                    val event = CalendarEvent(
+                        title = title,
+                        description = description,
+                        dateMillis = dateMillis,
+                        hasNotification = hasNotification
+                    )
+                    repository.insertEvent(event)
+                    count++
+                }
+                onComplete(count)
+            } catch (e: Exception) {
+                onError(e.localizedMessage ?: "Неверный формат файла")
+            }
         }
     }
 
